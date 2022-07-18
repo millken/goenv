@@ -1,4 +1,4 @@
-package env
+package goenv
 
 import (
 	"fmt"
