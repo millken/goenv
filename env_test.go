@@ -3,7 +3,9 @@ package goenv
 import (
 	"log"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -26,54 +28,83 @@ ENV_DEBUG: true
 	return nil
 }()
 
+func TestSwitch(t *testing.T) {
+	r := require.New(t)
+	r.True(IsOn())
+	Switch()
+	r.False(IsOn())
+	Switch()
+	r.True(IsOn())
+}
+
+func TestTrim(t *testing.T) {
+	r := require.New(t)
+	r.Equal("", fastTrim(""))
+	r.Equal("foo", fastTrim("foo"))
+	r.Equal("foo", fastTrim(" foo "))
+	r.Equal("foo", fastTrim("foo "))
+	r.Equal("foo", fastTrim(" foo"))
+}
+
+func BenchmarkTrim(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		strings.TrimSpace(" foo ")
+	}
+}
+
 func TestGet(t *testing.T) {
 	r := require.New(t)
 	r.NotZero(os.Getenv("GOPATH"))
+	r.True(IsSet("GOPATH"))
 
 	r.Equal(os.Getenv("GOPATH"), Get("GOPATH", "foo"))
 	r.Equal("bar", Get("IDONTEXIST", "bar"))
-	r.Equal(true, Bool("ENV_DEBUG", false))
-	r.Equal(8080, Int("ENV_PORT", 0))
-}
-
-func Test_MustGet(t *testing.T) {
-	r := require.New(t)
-	r.NotZero(os.Getenv("GOPATH"))
-
-	v, err := MustGet("GOPATH")
+	r.Equal(false, Bool("ENV_DEBUG", false))
+	r.Equal(false, Bool("IDONTEXIST", false))
+	port, err := Int("ENV_PORT", 0)
 	r.NoError(err)
-	r.Equal(os.Getenv("GOPATH"), v)
+	r.Equal(0, port)
 
-	_, err = MustGet("IDONTEXIST")
-	r.Error(err)
-}
-
-func Test_Set(t *testing.T) {
-	r := require.New(t)
-	r.Zero(os.Getenv("FOO"))
-	_, err := MustGet("FOO")
-	r.Error(err)
-
-	Set("FOO", "foo")
-	r.Equal("foo", Get("FOO", "bar"))
-	// but Set should not touch the os envrionment
-	r.NotEqual(os.Getenv("FOO"), "foo")
-	r.Error(err)
-}
-
-func Test_MustSet(t *testing.T) {
-	r := require.New(t)
-	r.Zero(os.Getenv("FOO"))
-
-	err := MustSet("FOO", "BAR")
+	os.Setenv("Dur", "3s")
+	dur, err := Duration("Dur", time.Second)
 	r.NoError(err)
-	// MustSet also set underlying os environment
-	r.Equal("BAR", os.Getenv("FOO"))
+	r.Equal(time.Second*3, dur)
+
+	r.True(IsOn())
+	Switch()
+	r.False(IsOn())
+	r.Equal("foo", Get("GOPATH", "foo"))
+
 }
 
-// Env files loading: automatically loaded by init()
-func Test_LoadEnvLoadsEnvFile(t *testing.T) {
+func TestLoad(t *testing.T) {
 	r := require.New(t)
+	err := Load()
+	r.NoError(err)
+	r.NotZero(os.Getenv("ENV_DIR"))
+	r.NotZero(os.Getenv("ENV_FLAVOUR"))
+	r.NotZero(os.Getenv("ENV_PORT"))
+	r.NotZero(os.Getenv("ENV_DEBUG"))
+
 	r.Equal("root", Get("ENV_DIR", ""))
 	r.Equal("none", Get("ENV_FLAVOUR", ""))
+	r.Equal("8080", Get("ENV_PORT", ""))
+	port, err := Int("ENV_PORT", 0)
+	r.NoError(err)
+	r.Equal(8080, port)
+	r.Equal(true, Bool("ENV_DEBUG", false))
+}
+
+func TestMarshal(t *testing.T) {
+	r := require.New(t)
+	m, err := Marshal()
+	r.NoError(err)
+	t.Log(m)
+	r.NotZero(m)
+}
+
+func BenchmarkGet(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		Get("GOPATH", "foo")
+	}
 }

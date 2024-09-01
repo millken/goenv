@@ -1,139 +1,207 @@
 package goenv
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
-	"sync"
-
-	"github.com/joho/godotenv"
+	"sync/atomic"
+	"time"
 )
 
-var mu = &sync.RWMutex{}
-var env = map[string]string{}
+var envOff atomic.Bool
 
-func init() {
-	Load()
-	loadSystemEnv()
+// Switch - turns off/on env lookup
+func Switch() {
+	envOff.Swap(!envOff.Load())
 }
 
-// Load the ENV variables to the env map
-func loadSystemEnv() {
-	mu.Lock()
-	defer mu.Unlock()
-
-	for _, e := range os.Environ() {
-		pair := strings.Split(e, "=")
-		env[pair[0]] = os.Getenv(pair[0])
-	}
+func IsOn() bool {
+	return !envOff.Load()
 }
 
-// Reload the ENV variables. Useful if
-// an external ENV manager has been used
-func Reload() {
-	env = map[string]string{}
-	loadSystemEnv()
-}
-
-// Load .env files. Files will be loaded in the same order that are received.
-// Redefined vars will override previously existing values.
-// IE: envy.Load(".env", "test_env/.env") will result in DIR=test_env
-// If no arg passed, it will try to load a .env file.
-func Load(files ...string) error {
-
-	// If no files received, load the default one
-	if len(files) == 0 {
-		err := godotenv.Load()
-		if err == nil {
-			Reload()
-		}
-		return err
-	}
-
-	// We received a list of files
-	for _, file := range files {
-
-		// Check if it exists or we can access
-		if _, err := os.Stat(file); err != nil {
-			// It does not exist or we can not access.
-			// Return and stop loading
-			return err
-		}
-
-		// It exists and we have permission. Load it
-		if err := godotenv.Load(file); err != nil {
-			return err
-		}
-
-		// Reload the env so all new changes are noticed
-		Reload()
-
-	}
-	return nil
+// IsSet returns if the given env key is set.
+// remember ENV must be a non-empty. All empty
+// values are considered unset.
+func IsSet(key string) bool {
+	return Get(key, "") != ""
 }
 
 // Get a value from the ENV. If it doesn't exist the
 // default value will be returned.
-func Get(key string, value string) string {
-	mu.RLock()
-	defer mu.RUnlock()
-	if v, ok := env[key]; ok {
-		return v
+func Get(key string, defaultValue string) string {
+	if IsOn() {
+		if v, ok := os.LookupEnv(key); ok {
+			return fastTrim(v)
+		}
 	}
-	return value
+	return defaultValue
 }
 
-// MustSet the value into the underlying ENV, as well as envy.
-// This may return an error if there is a problem setting the
-// underlying ENV value.
-func MustSet(key string, value string) error {
-	mu.Lock()
-	defer mu.Unlock()
-	err := os.Setenv(key, value)
+// Bool returns the boolean value represented by the string.
+func Bool(key string, defaultValue bool) bool {
+	val := Get(key, "")
+	if val == "true" ||
+		val == "1" ||
+		val == "t" ||
+		val == "T" ||
+		val == "TRUE" ||
+		val == "True" {
+		return true
+	}
+	return defaultValue
+}
+
+// Int returns the integer value represented by the string.
+func Int(key string, defaultValue int) (int, error) {
+	v := Get(key, "")
+	if v == "" {
+		return defaultValue, nil
+	}
+	return strconv.Atoi(v)
+}
+
+// Duration returns a parsed time.Duration if found in
+// the environment value, returns the default value duration
+// otherwise.
+func Duration(key string, defaultValue time.Duration) (time.Duration, error) {
+	v := Get(key, "")
+	if v == "" {
+		return defaultValue, nil
+	}
+	return time.ParseDuration(v)
+}
+
+func Load(filenames ...string) (err error) {
+	filenames = filenamesOrDefault(filenames)
+
+	for _, filename := range filenames {
+		err = loadFile(filename, false)
+		if err != nil {
+			return // return early on a spazout
+		}
+	}
+	return
+}
+
+func Overload(filenames ...string) (err error) {
+	filenames = filenamesOrDefault(filenames)
+
+	for _, filename := range filenames {
+		err = loadFile(filename, true)
+		if err != nil {
+			return // return early on a spazout
+		}
+	}
+	return
+}
+
+// Marshal outputs the given environment as a dotenv-formatted environment file.
+// Each line is in the format: KEY="VALUE" where VALUE is backslash-escaped.
+func Marshal() (string, error) {
+	var envMap = map[string]string{}
+
+	for _, e := range os.Environ() {
+		pair := strings.Split(e, "=")
+		envMap[pair[0]] = fastTrim(os.Getenv(pair[0]))
+	}
+	lines := make([]string, 0, len(envMap))
+	for k, v := range envMap {
+		if d, err := strconv.Atoi(v); err == nil {
+			lines = append(lines, fmt.Sprintf(`%s=%d`, k, d))
+		} else {
+			lines = append(lines, fmt.Sprintf(`%s="%s"`, k, doubleQuoteEscape(v)))
+		}
+	}
+	sort.Strings(lines)
+	return strings.Join(lines, "\n"), nil
+}
+
+const doubleQuoteSpecialChars = "\\\n\r\"!$`"
+
+func doubleQuoteEscape(line string) string {
+	for _, c := range doubleQuoteSpecialChars {
+		toReplace := "\\" + string(c)
+		if c == '\n' {
+			toReplace = `\n`
+		}
+		if c == '\r' {
+			toReplace = `\r`
+		}
+		line = strings.Replace(line, string(c), toReplace, -1)
+	}
+	return line
+}
+func filenamesOrDefault(filenames []string) []string {
+	if len(filenames) == 0 {
+		return []string{".env"}
+	}
+	return filenames
+}
+
+func loadFile(filename string, overload bool) error {
+	envMap, err := readFile(filename)
 	if err != nil {
 		return err
 	}
-	env[key] = value
+
+	currentEnv := map[string]bool{}
+	rawEnv := os.Environ()
+	for _, rawEnvLine := range rawEnv {
+		key := strings.Split(rawEnvLine, "=")[0]
+		currentEnv[key] = true
+	}
+
+	for key, value := range envMap {
+		if !currentEnv[key] || overload {
+			_ = os.Setenv(key, value)
+		}
+	}
+
 	return nil
 }
 
-// MustGet get a value from the ENV. If it doesn't exist
-// an error will be returned
-func MustGet(key string) (string, error) {
-	mu.RLock()
-	defer mu.RUnlock()
-	if v, ok := env[key]; ok {
-		return v, nil
+func readFile(filename string) (envMap map[string]string, err error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return
 	}
-	return "", fmt.Errorf("could not find ENV var with %s", key)
+	defer file.Close()
+
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, file)
+	if err != nil {
+		return nil, err
+	}
+	envMap = map[string]string{}
+	err = parseBytes(buf.Bytes(), envMap)
+	return
 }
 
-// Set a value into the ENV. This is NOT permanent. It will
-// only affect values accessed through envy.
-func Set(key string, value string) {
-	mu.Lock()
-	defer mu.Unlock()
-	env[key] = value
-}
-
-//Bool returns the boolean value represented by the string.
-func Bool(key string, value bool) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	if v, ok := env[key]; ok {
-		return strings.ToLower(v) == "true"
+func fastTrim(s string) string {
+	if s == "" {
+		return s
 	}
-	return value
-}
 
-//Int returns the integer value represented by the string.
-func Int(key string, value int) int {
-	mu.RLock()
-	defer mu.RUnlock()
-	if v, ok := env[key]; ok {
-		i, _ := strconv.Atoi(v)
-		return i
+	start := 0
+	end := len(s)
+	for start < end {
+		if s[start] != ' ' {
+			break
+		}
+		start++
 	}
-	return value
+	for end > start {
+		if s[end-1] != ' ' {
+			break
+		}
+		end--
+	}
+	if start == 0 && end == len(s) {
+		return s
+	}
+	return s[start:end]
 }
