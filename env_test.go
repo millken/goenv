@@ -28,15 +28,6 @@ ENV_DEBUG: true
 	return nil
 }()
 
-func TestSwitch(t *testing.T) {
-	r := require.New(t)
-	r.True(IsOn())
-	Switch()
-	r.False(IsOn())
-	Switch()
-	r.True(IsOn())
-}
-
 func TestTrim(t *testing.T) {
 	r := require.New(t)
 	r.Equal("", fastTrim(""))
@@ -69,12 +60,6 @@ func TestGet(t *testing.T) {
 	dur, err := Duration("Dur", time.Second)
 	r.NoError(err)
 	r.Equal(time.Second*3, dur)
-
-	r.True(IsOn())
-	Switch()
-	r.False(IsOn())
-	r.Equal("foo", Get("GOPATH", "foo"))
-
 }
 
 func TestLoad(t *testing.T) {

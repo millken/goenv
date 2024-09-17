@@ -8,20 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 )
-
-var envOff atomic.Bool
-
-// Switch - turns off/on env lookup
-func Switch() {
-	envOff.Swap(!envOff.Load())
-}
-
-func IsOn() bool {
-	return !envOff.Load()
-}
 
 // IsSet returns if the given env key is set.
 // remember ENV must be a non-empty. All empty
@@ -33,10 +21,8 @@ func IsSet(key string) bool {
 // Get a value from the ENV. If it doesn't exist the
 // default value will be returned.
 func Get(key string, defaultValue string) string {
-	if IsOn() {
-		if v, ok := os.LookupEnv(key); ok {
-			return fastTrim(v)
-		}
+	if v, ok := os.LookupEnv(key); ok {
+		return fastTrim(v)
 	}
 	return defaultValue
 }
