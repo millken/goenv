@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	"github.com/dnsoa/go/assert"
 )
 
 var _ = func() error {
@@ -29,7 +29,7 @@ ENV_DEBUG: true
 }()
 
 func TestTrim(t *testing.T) {
-	r := require.New(t)
+	r := assert.New(t)
 	r.Equal("", fastTrim(""))
 	r.Equal("foo", fastTrim("foo"))
 	r.Equal("foo", fastTrim(" foo "))
@@ -44,8 +44,8 @@ func BenchmarkTrim(b *testing.B) {
 }
 
 func TestGet(t *testing.T) {
-	r := require.New(t)
-	r.NotZero(os.Getenv("GOPATH"))
+	r := assert.New(t)
+	r.NotEmpty(os.Getenv("GOPATH"))
 	r.True(IsSet("GOPATH"))
 
 	r.Equal(os.Getenv("GOPATH"), Get("GOPATH", "foo"))
@@ -63,13 +63,13 @@ func TestGet(t *testing.T) {
 }
 
 func TestLoad(t *testing.T) {
-	r := require.New(t)
+	r := assert.New(t)
 	err := Load()
 	r.NoError(err)
-	r.NotZero(os.Getenv("ENV_DIR"))
-	r.NotZero(os.Getenv("ENV_FLAVOUR"))
-	r.NotZero(os.Getenv("ENV_PORT"))
-	r.NotZero(os.Getenv("ENV_DEBUG"))
+	r.NotEmpty(os.Getenv("ENV_DIR"))
+	r.NotEmpty(os.Getenv("ENV_FLAVOUR"))
+	r.NotEmpty(os.Getenv("ENV_PORT"))
+	r.NotEmpty(os.Getenv("ENV_DEBUG"))
 
 	r.Equal("root", Get("ENV_DIR", ""))
 	r.Equal("none", Get("ENV_FLAVOUR", ""))
@@ -81,11 +81,11 @@ func TestLoad(t *testing.T) {
 }
 
 func TestMarshal(t *testing.T) {
-	r := require.New(t)
+	r := assert.New(t)
 	m, err := Marshal()
 	r.NoError(err)
 	t.Log(m)
-	r.NotZero(m)
+	r.NotEmpty(m)
 }
 
 func BenchmarkGet(b *testing.B) {
