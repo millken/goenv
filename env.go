@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/exp/constraints"
 )
 
 // IsSet returns if the given env key is set.
@@ -52,7 +50,7 @@ func Bool(key string, defaultValue bool) bool {
 
 // Int returns the integer value represented by the string.
 // It supports all integer types (int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64).
-func Int[T constraints.Integer](key string, defaultValue T) (T, error) {
+func Int[T ~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](key string, defaultValue T) (T, error) {
 	v := Get(key, "")
 	if v == "" {
 		return defaultValue, nil
