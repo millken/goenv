@@ -1,3 +1,5 @@
+// Package goenv provides functions to manage environment variables
+// from .env files and retrieve typed values from the environment.
 package goenv
 
 import (
@@ -9,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/exp/constraints"
 )
 
 // IsSet returns if the given env key is set.
@@ -27,6 +31,11 @@ func Get(key string, defaultValue string) string {
 	return defaultValue
 }
 
+// String returns the string value represented by the string.
+func String(key string, defaultValue string) string {
+	return Get(key, defaultValue)
+}
+
 // Bool returns the boolean value represented by the string.
 func Bool(key string, defaultValue bool) bool {
 	val := Get(key, "")
@@ -42,12 +51,62 @@ func Bool(key string, defaultValue bool) bool {
 }
 
 // Int returns the integer value represented by the string.
-func Int(key string, defaultValue int) (int, error) {
+// It supports all integer types (int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64).
+func Int[T constraints.Integer](key string, defaultValue T) (T, error) {
 	v := Get(key, "")
 	if v == "" {
 		return defaultValue, nil
 	}
-	return strconv.Atoi(v)
+
+	var result T
+	var err error
+
+	switch any(result).(type) {
+	case int:
+		val, e := strconv.Atoi(v)
+		result = any(val).(T)
+		err = e
+	case int8:
+		val, e := strconv.ParseInt(v, 10, 8)
+		result = any(int8(val)).(T)
+		err = e
+	case int16:
+		val, e := strconv.ParseInt(v, 10, 16)
+		result = any(int16(val)).(T)
+		err = e
+	case int32:
+		val, e := strconv.ParseInt(v, 10, 32)
+		result = any(int32(val)).(T)
+		err = e
+	case int64:
+		val, e := strconv.ParseInt(v, 10, 64)
+		result = any(val).(T)
+		err = e
+	case uint:
+		val, e := strconv.ParseUint(v, 10, 0)
+		result = any(uint(val)).(T)
+		err = e
+	case uint8:
+		val, e := strconv.ParseUint(v, 10, 8)
+		result = any(uint8(val)).(T)
+		err = e
+	case uint16:
+		val, e := strconv.ParseUint(v, 10, 16)
+		result = any(uint16(val)).(T)
+		err = e
+	case uint32:
+		val, e := strconv.ParseUint(v, 10, 32)
+		result = any(uint32(val)).(T)
+		err = e
+	case uint64:
+		val, e := strconv.ParseUint(v, 10, 64)
+		result = any(val).(T)
+		err = e
+	default:
+		err = fmt.Errorf("unsupported integer type")
+	}
+
+	return result, err
 }
 
 // Duration returns a parsed time.Duration if found in
@@ -61,23 +120,15 @@ func Duration(key string, defaultValue time.Duration) (time.Duration, error) {
 	return time.ParseDuration(v)
 }
 
+// Load loads environment variables from .env file(s).
+// It searches for .env file in the current directory by default.
+// If multiple files are provided, they will be loaded in order.
+// Returns an error if any file cannot be loaded.
 func Load(filenames ...string) (err error) {
 	filenames = filenamesOrDefault(filenames)
 
 	for _, filename := range filenames {
 		err = loadFile(filename, false)
-		if err != nil {
-			return // return early on a spazout
-		}
-	}
-	return
-}
-
-func Overload(filenames ...string) (err error) {
-	filenames = filenamesOrDefault(filenames)
-
-	for _, filename := range filenames {
-		err = loadFile(filename, true)
 		if err != nil {
 			return // return early on a spazout
 		}
@@ -131,7 +182,7 @@ func filenamesOrDefault(filenames []string) []string {
 func loadFile(filename string, overload bool) error {
 	envMap, err := readFile(filename)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read file %s: %w", filename, err)
 	}
 
 	currentEnv := map[string]bool{}
